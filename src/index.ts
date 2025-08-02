@@ -232,15 +232,40 @@ server.tool(
   {
     paneId: z.string().describe("ID of the tmux pane"),
     command: z.string().describe("Command to execute"),
-    rawMode: z.boolean().optional().describe("Execute command without wrapper markers for REPL/interactive compatibility. Disables get-command-result status tracking. Use capture-pane to monitor interactive apps.")
+    rawMode: z.boolean().optional().describe("Execute command without wrapper markers for REPL/interactive compatibility. Disables get-command-result status tracking. Use capture-pane to monitor interactive apps."),
+    captureOutput: z.boolean().optional().describe("Immediately capture and return pane output after command execution"),
+    captureDelay: z.number().optional().describe("Delay in milliseconds before capturing output (default: 500). Use higher values for slower commands.")
   },
-  async ({ paneId, command, rawMode }) => {
+  async ({ paneId, command, rawMode, captureOutput, captureDelay }) => {
     try {
       const commandId = await tmux.executeCommand(paneId, command, rawMode);
 
-      // Create the resource URI for this command's results
-      const resourceUri = `tmux://command/${commandId}/result`;
+      if (captureOutput) {
+        // Wait for command to execute, then capture output
+        const delay = captureDelay || 500;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
+        try {
+          const capturedContent = await tmux.capturePaneContent(paneId);
+          return {
+            content: [{
+              type: "text",
+              text: `Command ID: ${commandId}\n\n--- Output ---\n${capturedContent || "No content captured"}`
+            }]
+          };
+        } catch (captureError) {
+          // If capture fails, still return command ID
+          return {
+            content: [{
+              type: "text",
+              text: `Command ID: ${commandId}\n\nNote: Output capture failed: ${captureError}\nUse capture-pane tool to manually retrieve output.`
+            }]
+          };
+        }
+      }
 
+      // Original behavior when captureOutput is false/undefined
+      const resourceUri = `tmux://command/${commandId}/result`;
       return {
         content: [{
           type: "text",
